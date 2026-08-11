@@ -1,0 +1,45 @@
+name: Hourly Job Alerts
+
+on:
+  schedule:
+    # Top of every hour, UTC. GitHub may delay runs a few minutes under load.
+    - cron: '0 * * * *'
+  workflow_dispatch:        # lets you click "Run workflow" to test manually
+
+# Needed so the job can commit seen_jobs.json back to the repo.
+permissions:
+  contents: write
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run job poller
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          # Only needed if you switch SMS_MODE to "twilio"
+          TWILIO_SID: ${{ secrets.TWILIO_SID }}
+          TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
+          TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
+        run: python job_alerts.py
+
+      - name: Save which jobs were already seen
+        run: |
+          git config user.name  "job-alerts-bot"
+          git config user.email "actions@github.com"
+          git add seen_jobs.json
+          # "diff --staged --quiet" exits 1 when there ARE changes to commit.
+          git diff --staged --quiet || git commit -m "state: $(date -u +%Y-%m-%dT%H:%M)"
+          git push
