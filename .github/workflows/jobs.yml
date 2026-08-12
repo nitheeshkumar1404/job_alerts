@@ -2,13 +2,18 @@ name: Hourly Job Alerts
 
 on:
   schedule:
-    # Top of every hour, UTC. GitHub may delay runs a few minutes under load.
     - cron: '0 * * * *'
-  workflow_dispatch:        # lets you click "Run workflow" to test manually
+  workflow_dispatch:
 
-# Needed so the job can commit seen_jobs.json back to the repo.
 permissions:
   contents: write
+
+# Stop two runs from racing each other. If a run is already going, a new one
+# waits rather than starting in parallel - that race is what caused the
+# "rejected (fetch first)" push failure.
+concurrency:
+  group: job-alerts
+  cancel-in-progress: false
 
 jobs:
   poll:
@@ -27,12 +32,10 @@ jobs:
 
       - name: Run job poller
         env:
+          TZ: America/Chicago
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          # Only needed if you switch SMS_MODE to "twilio"
-          TWILIO_SID: ${{ secrets.TWILIO_SID }}
-          TWILIO_TOKEN: ${{ secrets.TWILIO_TOKEN }}
-          TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: python job_alerts.py
 
       - name: Save which jobs were already seen
@@ -40,6 +43,21 @@ jobs:
           git config user.name  "job-alerts-bot"
           git config user.email "actions@github.com"
           git add seen_jobs.json
-          # "diff --staged --quiet" exits 1 when there ARE changes to commit.
-          git diff --staged --quiet || git commit -m "state: $(date -u +%Y-%m-%dT%H:%M)"
-          git push
+          git diff --staged --quiet && exit 0
+
+          # Retry loop: if someone else pushed while we were running, rebase
+          # onto their change and try again instead of failing the whole job.
+          for i in 1 2 3 4 5; do
+            git commit -m "state: $(date -u +%Y-%m-%dT%H:%M)" --allow-empty-message || true
+            if git push; then
+              echo "pushed on attempt $i"
+              exit 0
+            fi
+            echo "push rejected, rebasing and retrying ($i/5)"
+            git pull --rebase --autostash origin main || git rebase --abort || true
+            sleep $((i * 3))
+          done
+
+          echo "::warning::Could not save state after 5 attempts."
+          echo "Alerts still went out; the next run will re-check these jobs."
+          exit 0
