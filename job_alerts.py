@@ -170,6 +170,11 @@ MAX_SMS_JOBS = 4          # only used for SMS modes; email shows all
 #             which silently drop gateway messages.
 # "twilio" -> paid but reliable SMS
 # "off"    -> print to console only
+# Send an email on EVERY run, even when there are no new matches. Gives you
+# an hourly heartbeat so silence is never ambiguous. Set False to only hear
+# from it when there's actually a job.
+ALWAYS_EMAIL = True
+
 ALERT_MODE = "email"
 ALERT_TO = "nitheeshkumar87@gmail.com"   # where alerts land
 PHONE = "4058771675"
@@ -1262,6 +1267,31 @@ def main():
         mode = ("no new matching titles" if TITLE_MATCH_ONLY
                 else f"nothing new at >= {MIN_SCORE}")
         print(f"[{stamp}] {mode}")
+        if ALWAYS_EMAIL:
+            ok = len(SOURCES) - len(errors)
+            body = (f"Job scan ran {stamp} - no new matches.\n\n"
+                    f"Sources checked : {ok}/{len(SOURCES)}\n"
+                    f"Postings tracked: {len(seen):,}\n"
+                    + (f"Sources erroring: {len(errors)}\n" if errors else "")
+                    + "\nNothing new posted since the last run. This is the "
+                      "hourly confirmation that the scan is alive.")
+            html = (
+                "<div style=\"font-family:-apple-system,Segoe UI,sans-serif;"
+                "max-width:600px;color:#444\">"
+                f"<p style=\"font-size:15px\"><b>No new matches</b> "
+                f"&middot; {stamp}</p>"
+                "<table style=\"font-size:13px;color:#666;border-collapse:collapse\">"
+                f"<tr><td style=\"padding:2px 14px 2px 0\">Sources checked</td>"
+                f"<td><b>{ok}/{len(SOURCES)}</b></td></tr>"
+                f"<tr><td style=\"padding:2px 14px 2px 0\">Postings tracked</td>"
+                f"<td><b>{len(seen):,}</b></td></tr>"
+                + (f"<tr><td style=\"padding:2px 14px 2px 0\">Erroring</td>"
+                   f"<td style=\"color:#c00\"><b>{len(errors)}</b></td></tr>"
+                   if errors else "")
+                + "</table>"
+                "<p style=\"font-size:12px;color:#999;margin-top:14px\">"
+                "Hourly confirmation that the scan is alive.</p></div>")
+            send_alert(body, f"Job scan {stamp} - nothing new", html)
 
     if errors:
         print("\n".join(errors))
