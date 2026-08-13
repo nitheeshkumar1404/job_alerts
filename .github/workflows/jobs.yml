@@ -2,7 +2,14 @@ name: Hourly Job Alerts
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    # NOT on the hour. GitHub's shared runners are most contended at :00, so
+    # runs there are routinely delayed 5-30 min or dropped entirely. Odd
+    # minutes off the hour get picked up far more reliably.
+    #
+    # Two attempts per hour: if one is dropped under load, the other covers
+    # it. The concurrency guard below stops them overlapping.
+    - cron: '17 * * * *'
+    - cron: '47 * * * *'
   workflow_dispatch:
 
 permissions:
